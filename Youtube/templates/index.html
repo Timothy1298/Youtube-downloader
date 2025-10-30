@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Downloader Web (Full)</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>YouTube Downloader Web</h1>
+
+        <div class="card">
+            <div class="input-group full-width">
+                <label for="url-input">YouTube URL (Video or Playlist)</label>
+                <input type="text" id="url-input" placeholder="Paste link here (Ctrl+V)">
+            </div>
+            
+            <div class="options-grid">
+                <div class="input-group">
+                    <label for="mode-select">Mode</label>
+                    <select id="mode-select">
+                        <option value="video" selected>Video</option>
+                        <option value="audio">Audio Only (MP3/M4A)</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="format-select">Format</label>
+                    <select id="format-select">
+                        <option value="mp4" selected>MP4</option>
+                        <option value="webm">WebM</option>
+                        <option value="mp3">MP3 (Audio Only)</option>
+                    </select>
+                </div>
+                
+                <div class="input-group">
+                    <label for="quality-select">Quality/Resolution</label>
+                    <select id="quality-select">
+                        <option value="highest" selected>Highest Available</option>
+                        <option value="1080p">1080p</option>
+                        <option value="720p">720p</option>
+                        <option value="480p">480p</option>
+                        <option value="360p">360p</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="subs-input">Subs (e.g., en,es)</label>
+                    <input type="text" id="subs-input" placeholder="en, es, auto">
+                </div>
+            </div>
+
+            <div class="input-group full-width folder-display-group">
+                <label>Output Folder (Server Path)</label>
+                <div class="folder-action">
+                    <span id="output-dir-span">{{ default_output_dir }}</span>
+                    <button id="open-folder-btn" title="Open folder on the server">Open Folder</button>
+                </div>
+            </div>
+
+            <div class="options-grid trim-options">
+                <div class="input-group">
+                    <label for="start-input">Trim Start (HH:MM:SS)</label>
+                    <input type="text" id="start-input" placeholder="00:00:00">
+                </div>
+                <div class="input-group">
+                    <label for="end-input">Trim End (HH:MM:SS)</label>
+                    <input type="text" id="end-input" placeholder="00:00:00">
+                </div>
+            </div>
+
+            <div class="checkbox-group">
+                <label>
+                    <input type="checkbox" id="embed-subs-check"> Embed Subtitles (Re-encode required)
+                </label>
+            </div>
+        </div>
+
+        <div class="card action-card">
+            <button id="get-info-btn">Get Info</button>
+            <button id="download-btn" class="accent-btn" disabled>Start Download</button>
+        </div>
+
+        <div id="metadata-preview" class="card hidden">
+            <div class="metadata-content">
+                <div id="thumbnail-box">
+                    </div>
+                <div id="metadata-text">
+                    <strong>Title:</strong> <span id="meta-title"></span><br>
+                    <strong>Channel:</strong> <span id="meta-author"></span><br>
+                    <strong>Duration:</strong> <span id="meta-duration"></span><br>
+                    <strong>Views:</strong> <span id="meta-views"></span><br>
+                    <span id="meta-playlist-alert" class="alert-text hidden"></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="card status-card">
+            <h2>Download Queue</h2>
+            <ul id="task-list">
+                <li id="empty-queue-msg">No active downloads.</li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

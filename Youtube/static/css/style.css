@@ -10,6 +10,70 @@ body {
     justify-content: center;
 }
 
+body.dark-mode {
+  background-color: #181a1b;
+  color: #f0f2fa;
+}
+body.dark-mode .container {
+  background: #23272b;
+  color: #e0e0e0;
+}
+body.dark-mode .card {
+  background: #23272b;
+  border: 1px solid #2a2d31;
+}
+body.dark-mode input, body.dark-mode select, body.dark-mode textarea {
+  background: #23272b;
+  color: #f0f2fa;
+  border-color: #444750;
+}
+body.dark-mode .folder-display-group #output-dir-span {
+  background: #202326;
+  color: #bfc1c5;
+}
+body.dark-mode #task-list li {
+  background: #1d2023;
+  border-left-color: #398aff;
+  color: #f0f2fa;
+}
+body.dark-mode #task-list li.completed {
+  background: #183921;
+  border-left-color: #50fa7b;
+}
+body.dark-mode #task-list li.failed {
+  background: #3e1f23;
+  border-left-color: #ff3860;
+}
+body.dark-mode .progress-bar-container {
+  background-color: #2f3340;
+}
+body.dark-mode .progress-bar {
+  background-color: #398aff;
+}
+body.dark-mode .status.completed {
+  background-color: #50fa7b;
+  color: #181a1b;
+}
+body.dark-mode .status.failed {
+  background-color: #ff3860;
+}
+body.dark-mode .status.downloading {
+  background-color: #398aff;
+}
+body.dark-mode .status.queued {
+  background-color: #ffd66b;
+  color: #23272b;
+}
+body.dark-mode #get-info-btn {
+  background-color: #e1ad55;
+  color: #23272b;
+}
+body.dark-mode #open-folder-btn {
+  background-color: #23272b;
+  color: #ffd66b;
+  border: 1px solid #ffd66b;
+}
+
 .container {
     width: 95%;
     max-width: 900px;
@@ -61,6 +125,14 @@ h2 {
     box-sizing: border-box;
     font-size: 14px;
     transition: border-color 0.2s;
+    background-color: white; /* Ensure consistent background */
+}
+
+/* Disabled/Readonly state for Selects/Inputs */
+.input-group select:disabled {
+    background-color: #eee;
+    color: #888;
+    cursor: not-allowed;
 }
 
 .input-group input:focus, .input-group select:focus {
@@ -83,13 +155,23 @@ h2 {
     margin-top: 10px;
     font-size: 0.9em;
 }
+.checkbox-group label {
+    display: flex;
+    align-items: center;
+    font-weight: normal;
+}
+.checkbox-group input[type="checkbox"] {
+    margin-right: 8px;
+    height: 16px;
+    width: 16px;
+}
 
 /* --- Folder Display --- */
 .folder-display-group .folder-action {
     display: flex;
     gap: 10px;
     align-items: center;
-    padding: 8px 0;
+    padding: 2px 0; /* Reduced vertical padding */
     background-color: #f0f3f6;
     border-radius: 5px;
     border: 1px solid #ddd;
@@ -102,9 +184,10 @@ h2 {
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+    padding: 8px 0; /* Restore padding here */
 }
 #open-folder-btn {
-    padding: 6px 15px;
+    padding: 8px 15px; /* Matched button padding */
     background-color: #007bff;
     color: white;
     border: none;
@@ -152,7 +235,7 @@ h2 {
     background-color: #218838;
 }
 
-#download-btn:disabled {
+#download-btn:disabled, #get-info-btn:disabled {
     background-color: #a0a0a0;
     cursor: not-allowed;
 }
@@ -200,6 +283,10 @@ h2 {
 
 /* --- Download Queue --- */
 
+.status-card {
+    min-height: 150px;
+}
+
 #task-list {
     list-style: none;
     padding: 0;
@@ -239,11 +326,13 @@ h2 {
 .task-body p {
     margin: 3px 0;
     font-size: 0.85em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .task-url {
     color: #888;
-    word-break: break-all;
 }
 
 .task-filename {

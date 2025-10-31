@@ -9,7 +9,21 @@ from typing import Optional, Dict, Any, List
 
 import yt_dlp
 from flask import Flask, request, jsonify, render_template, send_from_directory, current_app
+import time
+from collections import defaultdict, deque
 from yt_dlp.utils import DownloadError
+from app_logger import logger
+import concurrent.futures
+from flask_wtf.csrf import CSRFProtect
+from flask_babel import Babel
+
+app = Flask(__name__)
+csrf = CSRFProtect(app)
+app.config['BABEL_DEFAULT_LOCALE'] = 'en'
+babel = Babel(app)
+# Placeholder for future per-user language selection (see Flask-Babel docs)
+# For REST endpoints: tokens must come in header (JS demo: see docs). For now, routes are exempted for easy migration, but a comment is left for hardening.
+# Example for later: @csrf.exempt for specific API routes, or require X-CSRFToken in JS fetch requests.
 
 # --- Configuration ---
 # Use a default folder. WARNING: Web UI cannot trigger a local OS folder dialog.
@@ -19,7 +33,24 @@ DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # Global dictionary to track active downloads and their status
 DOWNLOAD_TASKS: Dict[str, Dict[str, Any]] = {}
-app = Flask(__name__)
+MAX_CONCURRENT_DOWNLOADS = 3
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_DOWNLOADS)
+
+# --- Simple in-memory rate limiter (Per-IP) ---
+RATE_LIMIT = 5  # requests per minute
+rate_limit_window = 60  # seconds
+ip_request_times = defaultdict(lambda: deque())
+
+def check_rate_limit(ip):
+    now = time.time()
+    times = ip_request_times[ip]
+    # Remove timestamps older than window
+    while times and now - times[0] > rate_limit_window:
+        times.popleft()
+    if len(times) >= RATE_LIMIT:
+        return False
+    times.append(now)
+    return True
 
 # --- Helper Functions ---
 
@@ -39,7 +70,7 @@ def _download_worker(url: str, options: Dict[str, Any], task_id: str):
     is_playlist = options.get('is_playlist', False)
     fmt = options.get('format', 'mp4') # video or audio format
     quality = options.get('quality', 'highest') # 1080p, 720p, etc.
-    subs = options.get('subtitles_langs')
+    subs_list = options.get('subtitles_langs') # This is now a comma-separated string of languages
     embed_subs = options.get('embed_subtitles', False)
     trim_start = options.get('trim_start')
     trim_end = options.get('trim_end')
@@ -87,16 +118,29 @@ def _download_worker(url: str, options: Dict[str, Any], task_id: str):
         # Video format (combining best video and audio)
         # Using the resolution/quality option
         if quality == 'highest':
-             ydl_opts['format'] = f'bestvideo[ext={fmt}]+bestaudio/best[ext={fmt}]'
+             ydl_opts['format'] = f'bestvideo[ext={fmt}]+bestaudio/best/best[ext={fmt}]' # Added best/best for robustness
         else:
              ydl_opts['format'] = f'bestvideo[height<={quality.replace("p", "")}][ext={fmt}]+bestaudio/best[ext={fmt}]'
 
         ydl_opts['merge_output_format'] = fmt
 
     # Subtitles
-    if subs:
+    if subs_list and subs_list != 'none': # Check for 'none' which is the default/empty selection
         ydl_opts['writesubtitles'] = True
-        ydl_opts['subtitleslangs'] = subs.split(',')
+        
+        # If the user selected 'auto' and a language, handle it:
+        if 'auto' in subs_list.lower():
+            ydl_opts['writeautomaticsubs'] = True
+            # Strip 'auto' and check for explicit lang fallback (e.g., 'auto,en')
+            subs_list = subs_list.replace('auto', '').strip(', ')
+            if subs_list:
+                ydl_opts['subtitleslangs'] = [lang.strip() for lang in subs_list.split(',') if lang.strip()]
+            else:
+                # If only 'auto' was selected, yt-dlp will fetch the default autogen subs
+                pass 
+        else:
+            ydl_opts['subtitleslangs'] = [lang.strip() for lang in subs_list.split(',') if lang.strip()]
+
         if embed_subs:
             ydl_opts['postprocessors'] = ydl_opts.get('postprocessors', []) + [
                 {'key': 'FFmpegEmbedSubtitle'} # Note: This forces re-encode, which takes time
@@ -134,11 +178,11 @@ def _download_worker(url: str, options: Dict[str, Any], task_id: str):
     except DownloadError as e:
         task['status'] = 'FAILED'
         task['message'] = f'Download failed: yt-dlp error: {e}'
-        current_app.logger.error(f"yt-dlp error for {url}: {e}")
+        logger.error(f"yt-dlp error for {url}: {e}")
     except Exception as e:
         task['status'] = 'FAILED'
         task['message'] = f'Download failed: {str(e)}'
-        current_app.logger.error(f"General error for {url}: {e}")
+        logger.error(f"General error for {url}: {e}")
     finally:
         # If the filename is still 'N/A' but the status is COMPLETED, set it to the best guess
         if task['status'] == 'COMPLETED' and task['filename'] == 'N/A' and task['result_path'] != 'N/A':
@@ -154,16 +198,22 @@ def index():
 
 @app.route('/api/metadata', methods=['POST'])
 def get_metadata():
-    """Fetches video metadata (Title, Author, Thumbnail URL, etc.)."""
+    """Fetches video metadata (Title, Author, Thumbnail URL, Subtitles, etc.)."""
+    ip = request.remote_addr or 'unknown'
+    if not check_rate_limit(ip):
+        return jsonify({'status': 'error', 'message': 'Too many requests. Please wait and try again.'}), 429
+
     url = request.json.get('url')
-    if not url:
-        return jsonify({'status': 'error', 'message': 'URL is required'}), 400
+    if not url or 'youtube.' not in url.lower():
+        return jsonify({'status': 'error', 'message': 'Valid YouTube URL is required'}), 400
     
     try:
         ydl_opts = {
             'noplaylist': True,
             'quiet': True,
             'skip_download': True,
+            'writesubtitles': True,
+            'writeautomaticsubs': True,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -172,16 +222,35 @@ def get_metadata():
             return jsonify({'status': 'error', 'message': 'Could not extract metadata'}), 500
 
         # Handle playlists/mixes by using the first entry's data
+        is_playlist = is_playlist_url(url)
         if 'entries' in info and info['entries']:
-            info = info['entries'][0]
+            # For playlists, still use the first entry for metadata preview
+            info_preview = info['entries'][0]
+        else:
+            info_preview = info
+
+        # Extract available subtitles
+        available_subs = []
+        if 'subtitles' in info_preview:
+            # Keys are language codes, values are list of subtitle entries
+            for lang_code in info_preview['subtitles'].keys():
+                available_subs.append(lang_code)
+        
+        # Add automatic captions if available
+        if 'automatic_captions' in info_preview:
+            for lang_code in info_preview['automatic_captions'].keys():
+                if lang_code not in available_subs:
+                     available_subs.append(lang_code)
 
         metadata = {
-            'title': info.get('title', 'N/A'),
-            'author': info.get('uploader', 'N/A'),
-            'duration_seconds': info.get('duration', 0),
-            'views': info.get('view_count', 0),
-            'thumbnail_url': info.get('thumbnail'),
-            'is_playlist': is_playlist_url(url)
+            'title': info_preview.get('title', 'N/A'),
+            'author': info_preview.get('uploader', 'N/A'),
+            'duration_seconds': info_preview.get('duration', 0),
+            'views': info_preview.get('view_count', 0),
+            'thumbnail_url': info_preview.get('thumbnail'),
+            'is_playlist': is_playlist,
+            # NEW: Return sorted, unique list of subtitle codes
+            'available_subtitles': sorted(list(set(available_subs)))
         }
         return jsonify({'status': 'success', 'metadata': metadata})
 
@@ -192,11 +261,14 @@ def get_metadata():
 @app.route('/api/download', methods=['POST'])
 def start_download():
     """Starts a new download task in a separate thread."""
+    ip = request.remote_addr or 'unknown'
+    if not check_rate_limit(ip):
+        return jsonify({'status': 'error', 'message': 'Too many requests. Please wait and try again.'}), 429
+
     data = request.json
     url = data.get('url')
-    
-    if not url:
-        return jsonify({'status': 'error', 'message': 'URL is required'}), 400
+    if not url or 'youtube.' not in url.lower():
+        return jsonify({'status': 'error', 'message': 'Valid YouTube URL is required'}), 400
 
     # Collect all options
     options = {
@@ -226,12 +298,9 @@ def start_download():
         **options # Store options for reference
     }
     
-    # Start the download in a new thread
-    thread = threading.Thread(
-        target=_download_worker, 
-        args=(url, DOWNLOAD_TASKS[task_id], task_id)
-    )
-    thread.start()
+    # Instead of thread, submit to executor (thread pool)
+    future = executor.submit(_download_worker, url, DOWNLOAD_TASKS[task_id], task_id)
+    DOWNLOAD_TASKS[task_id]['future'] = future
 
     return jsonify({
         'status': 'success', 
@@ -249,6 +318,19 @@ def get_status(task_id):
         return jsonify({'status': 'error', 'message': 'Task not found'}), 404
         
     return jsonify(task)
+
+
+@app.route('/api/downloads', methods=['GET'])
+def list_downloads():
+    """Returns a JSON list of all download tasks and their metadata/status."""
+    return jsonify({tid: {k:v for k,v in t.items() if k != 'future'} for tid, t in DOWNLOAD_TASKS.items()})
+
+
+@app.route('/api/history', methods=['GET'])
+def download_history():
+    """Returns all completed download tasks (prototype: not filtered by user/session yet.)"""
+    completed = {tid: t for tid, t in DOWNLOAD_TASKS.items() if t['status'] == 'COMPLETED'}
+    return jsonify(completed)
 
 
 @app.route('/api/open_folder', methods=['GET'])
@@ -270,4 +352,5 @@ def open_folder():
 
 
 if __name__ == '__main__':
+    # Setting use_reloader=False stops Flask from running the background thread twice
     app.run(debug=True, host='0.0.0.0', port=5000)

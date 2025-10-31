@@ -1,0 +1,10 @@
+Flask>=2.0
+pytube>=15.0
+Flask-WTF>=1.0
+Flask-Login>=0.6
+Flask-Babel>=4.0.0
+gunicorn>=20.0
+requests>=2.0
+celery>=5.0
+redis>=4.0
+python-dotenv>=0.20

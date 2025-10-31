@@ -4,7 +4,7 @@ const urlInput = document.getElementById('url-input');
 const modeSelect = document.getElementById('mode-select');
 const formatSelect = document.getElementById('format-select');
 const qualitySelect = document.getElementById('quality-select');
-const subsInput = document.getElementById('subs-input');
+const subsSelect = document.getElementById('subs-select'); // NEW: Subtitles Select
 const embedSubsCheck = document.getElementById('embed-subs-check');
 const startInput = document.getElementById('start-input');
 const endInput = document.getElementById('end-input');
@@ -22,7 +22,48 @@ const metaAuthor = document.getElementById('meta-author');
 const metaDuration = document.getElementById('meta-duration');
 const metaViews = document.getElementById('meta-views');
 const metaPlaylistAlert = document.getElementById('meta-playlist-alert');
+const filenameInput = document.getElementById('filename-input');
 
+// DARK MODE TOGGLE
+const darkModeBtn = document.getElementById('dark-mode-toggle');
+function setDarkMode(enabled) {
+  document.body.classList.toggle('dark-mode', enabled);
+  localStorage.setItem('darkMode', enabled);
+}
+darkModeBtn.addEventListener('click', () => {
+  const isDark = document.body.classList.toggle('dark-mode');
+  localStorage.setItem('darkMode', isDark);
+  darkModeBtn.textContent = isDark ? '☀️ Light Mode' : '🌙 Dark Mode';
+});
+// Use stored preference
+if(localStorage.getItem('darkMode') === 'true') setDarkMode(true);
+// HISTORY FETCH
+function fetchHistory() {
+  fetch('/api/history').then(r => r.json()).then(renderHistory).catch(() => {});
+}
+function renderHistory(tasks) {
+  const list = document.getElementById('history-list');
+  if (!list) return;
+  list.innerHTML = '';
+  const tids = Object.keys(tasks);
+  if (tids.length === 0) { list.innerHTML = '<li>No history.</li>'; return; }
+  tids.reverse().forEach(tid => {
+    const t = tasks[tid];
+    const li = document.createElement('li');
+    li.innerHTML = `<strong>${t.filename}</strong><br>${t.url}<br><span class='status completed'>${t.status}</span>`;
+    list.appendChild(li);
+  });
+}
+// LANG DROPDOWN (stub)
+const langSelect = document.getElementById('lang-select');
+if (langSelect) {
+  langSelect.addEventListener('change', (e) => {
+    alert('Language switching will be enabled soon.');
+  });
+}
+// LOGIN/LOGOUT (stub)
+document.getElementById('login-btn')?.addEventListener('click',()=>alert('Login coming soon!'));
+document.getElementById('logout-btn')?.addEventListener('click',()=>alert('Logout coming soon!'));
 
 // Map to store interval IDs for polling
 const activePolls = {};
@@ -41,17 +82,45 @@ function disableDownload() {
 }
 
 function formatDuration(seconds) {
+    if (seconds === 0) return '0s';
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.round(seconds % 60);
-    const parts = [h, m, s];
     
     // Ensure hours are shown if duration is >= 1 hour
     if (h > 0) {
-        return parts.map(v => v.toString().padStart(2, '0')).join(':');
+        return `${h}h ${m}m ${s}s`;
     }
     // Minutes:Seconds format
-    return parts.slice(1).map(v => v.toString().padStart(2, '0')).join(':');
+    return `${m}m ${s}s`;
+}
+
+function populateSubtitles(langs) {
+    subsSelect.innerHTML = '';
+    
+    // Default options
+    subsSelect.innerHTML += '<option value="none" selected>None</option>';
+    
+    // Auto-Generated Captions option (always available)
+    subsSelect.innerHTML += '<option value="auto">Auto-Generated Captions</option>';
+    
+    if (langs && langs.length > 0) {
+        // Add available stream-provided subtitles
+        langs.forEach(lang => {
+            // Simple display mapping for common languages
+            let displayLang = lang;
+            if (lang === 'en') displayLang = 'English (en)';
+            if (lang === 'es') displayLang = 'Spanish (es)';
+            if (lang === 'fr') displayLang = 'French (fr)';
+            if (lang === 'de') displayLang = 'German (de)';
+            
+            subsSelect.innerHTML += `<option value="${lang}">${displayLang}</option>`;
+        });
+        subsSelect.title = "Select a language, or 'Auto' for machine-generated captions.";
+    } else {
+        subsSelect.title = "No stream-provided subtitles found. Only 'Auto-Generated Captions' is available.";
+    }
+    subsSelect.selectedIndex = 0; // Select 'None' by default
 }
 
 
@@ -71,7 +140,8 @@ function getMetadata() {
     // Clear previous metadata
     metadataPreview.classList.add('hidden');
     thumbnailBox.innerHTML = '<div class="loader-small"></div>';
-    
+    populateSubtitles(null); // Reset subtitles
+
     fetch('/api/metadata', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -99,6 +169,9 @@ function getMetadata() {
                 metaPlaylistAlert.classList.add('hidden');
             }
             
+            // Populate subtitles dropdown
+            populateSubtitles(md.available_subtitles);
+
             // Populate thumbnail
             if (md.thumbnail_url) {
                 thumbnailBox.innerHTML = `<img src="${md.thumbnail_url}" alt="Thumbnail">`;
@@ -135,12 +208,15 @@ function startDownload() {
     disableDownload();
 
     // 1. Collect all options from the UI
+    const selectedSubs = subsSelect.value;
+    
     const options = {
         url: url,
         audio_only: modeSelect.value === 'audio',
         format: formatSelect.value,
         quality: qualitySelect.value,
-        subtitles_langs: subsInput.value.trim() || null,
+        // Pass 'none' if no subtitle is selected, otherwise pass the language code
+        subtitles_langs: selectedSubs !== 'none' ? selectedSubs : null,
         embed_subtitles: embedSubsCheck.checked,
         trim_start: startInput.value.trim() || null,
         trim_end: endInput.value.trim() || null,
@@ -238,7 +314,7 @@ function addTaskToUI(taskId, task) {
             <span class="status ${task.status.toLowerCase()}">${task.status}</span>
         </div>
         <div class="task-body">
-            <p class="task-url">${task.url}</p>
+            <p class="task-url" title="${task.url}">${task.url}</p>
             <p class="task-filename" title="File Name">${task.filename}</p>
             <div class="progress-bar-container">
                 <div class="progress-bar" style="width: ${task.progress}%;"></div>
@@ -295,6 +371,8 @@ function handleModeChange() {
             <option value="m4a">M4A</option>
             <option value="best">Best Audio</option>
         `;
+        // Audio mode defaults to highest quality which is handled by ytdlp
+        qualitySelect.value = 'highest'; 
     } else {
         formatSelect.innerHTML = `
             <option value="mp4" selected>MP4</option>
@@ -311,7 +389,14 @@ getInfoBtn.addEventListener('click', getMetadata);
 openFolderBtn.addEventListener('click', handleOpenFolder);
 modeSelect.addEventListener('change', handleModeChange);
 
-// Allow pressing Enter in the URL input field
+// Monitor URL input for changes to prompt metadata refresh
+urlInput.addEventListener('input', () => {
+    metadataPreview.classList.add('hidden');
+    downloadBtn.disabled = true;
+    populateSubtitles(null); // Clear subtitles when URL changes
+});
+
+// Allow pressing Enter in the URL input field to get info
 urlInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
         getMetadata();
@@ -321,8 +406,5 @@ urlInput.addEventListener('keypress', (e) => {
 // Initial state setup
 document.addEventListener('DOMContentLoaded', () => {
     handleModeChange(); // Set initial format options
-    urlInput.addEventListener('input', () => {
-        metadataPreview.classList.add('hidden');
-        downloadBtn.disabled = true;
-    });
+    fetchHistory(); // Fetch history on load
 });
